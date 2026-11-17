@@ -370,6 +370,22 @@ export default class Component {
         this.valueStore.flushDirtyPropsToPending();
         this.isRequestPending = remainingActions.length > 0;
 
+        // A REJECTED FETCH REACHES NEITHER THE CALLBACK BELOW NOR ITS `backendRequest = null`,
+        // and `tryStartingRequest()` then takes its "a request is already running" branch for
+        // every later model change or action: the component never contacts the server again
+        // until the page is reloaded. This is a SEPARATE subscription on the same promise rather
+        // than a `.catch()` on the chain below, so that it sees transport rejections only and
+        // never an error thrown while rendering a successful response.
+        //
+        // The request is deliberately NOT retried. Whether a failed request should be reissued
+        // is a policy decision, and reissuing one automatically against a backend that is down
+        // turns a single failure into a loop.
+        this.backendRequest.promise.catch(() => {
+            this.backendRequest = null;
+            this.isRequestPending = false;
+            this.hooks.triggerHook('loading.state:finished', this.element);
+        });
+
         this.backendRequest.promise.then(async (response) => {
             const backendResponse = new BackendResponse(response);
             const headers = backendResponse.response.headers;
